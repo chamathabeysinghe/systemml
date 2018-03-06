@@ -36,9 +36,14 @@ public class AlgorithmDatagen extends AutomatedTestBase
 	private final static String TEST_NAME1 = "Algorithm_Datagen";
 	private final static String TEST_DIR = "functions/codegenalg/";
 	private final static String TEST_CLASS_DIR = TEST_DIR + AlgorithmDatagen.class.getSimpleName() + "/";
-	private final static String TEST_CONF = "SystemML-config-codegen.xml";
-	private final static File   TEST_CONF_FILE = new File(SCRIPT_DIR + TEST_DIR, TEST_CONF);
-	
+	private final static String TEST_CONF_DEFAULT = "SystemML-config-codegen.xml";
+	private final static File TEST_CONF_FILE_DEFAULT = new File(SCRIPT_DIR + TEST_DIR, TEST_CONF_DEFAULT);
+	private final static String TEST_CONF_FUSE_ALL = "SystemML-config-codegen-fuse-all.xml";
+	private final static File TEST_CONF_FILE_FUSE_ALL = new File(SCRIPT_DIR + TEST_DIR, TEST_CONF_FUSE_ALL);
+	private final static String TEST_CONF_FUSE_NO_REDUNDANCY = "SystemML-config-codegen-fuse-no-redundancy.xml";
+	private final static File TEST_CONF_FILE_FUSE_NO_REDUNDANCY = new File(SCRIPT_DIR + TEST_DIR,
+			TEST_CONF_FUSE_NO_REDUNDANCY);
+
 	private final static int rows = 2468;
 	private final static int cols = 200;
 	
@@ -49,7 +54,10 @@ public class AlgorithmDatagen extends AutomatedTestBase
 		LINREG,
 		LOGREG,
 	}
-	
+
+	private enum TestType { DEFAULT,FUSE_ALL,FUSE_NO_REDUNDANCY }
+	private static TestType currentTestType = TestType.DEFAULT;
+
 	@Override
 	public void setUp() {
 		TestUtils.clearAssertionInformation();
@@ -138,51 +146,52 @@ public class AlgorithmDatagen extends AutomatedTestBase
 	
 	private void runStepwiseTest( DatagenType type, boolean sparse, boolean rewrites, ExecType instType)
 	{
-		boolean oldFlag = OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION;
-		RUNTIME_PLATFORM platformOld = rtplatform;
-		switch( instType ){
-			case SPARK: rtplatform = RUNTIME_PLATFORM.SPARK; break;
-			default: rtplatform = RUNTIME_PLATFORM.HYBRID_SPARK; break;
-		}
-		
-		boolean sparkConfigOld = DMLScript.USE_LOCAL_SPARK_CONFIG;
-		if( rtplatform == RUNTIME_PLATFORM.SPARK || rtplatform == RUNTIME_PLATFORM.HYBRID_SPARK )
-			DMLScript.USE_LOCAL_SPARK_CONFIG = true;
-		
-		OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = rewrites;
-		
-		try
-		{
-			String TEST_NAME = TEST_NAME1;
-			TestConfiguration config = getTestConfiguration(TEST_NAME);
-			loadTestConfiguration(config);
-			
-			double sparsity = sparse ? sparsity2 : sparsity1;
-			
-			if( type ==  DatagenType.LINREG) {
-				fullDMLScriptName = "scripts/datagen/genRandData4LinearRegression.dml";
-				programArgs = new String[]{ "-explain", "-stats", "-args",
-					String.valueOf(rows), String.valueOf(cols), "10", "1", output("w"),
-					output("X"), output("y"), "1", "1", String.valueOf(sparsity), "binary"};
+		for(TestType testType:TestType.values()) {
+			currentTestType = testType;
+			boolean oldFlag = OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION;
+			RUNTIME_PLATFORM platformOld = rtplatform;
+			switch (instType) {
+			case SPARK:
+				rtplatform = RUNTIME_PLATFORM.SPARK;
+				break;
+			default:
+				rtplatform = RUNTIME_PLATFORM.HYBRID_SPARK;
+				break;
 			}
-			else { //LOGREG
-				fullDMLScriptName = "scripts/datagen/genRandData4LogisticRegression.dml";
-				programArgs = new String[]{ "-explain", "-stats", "-args",
-					String.valueOf(rows), String.valueOf(cols), "10", "1", output("w"),
-					output("X"), output("y"), "1", "1", String.valueOf(sparsity), "binary", "1"};
-			}
-			
-			runTest(true, false, null, -1); 
 
-			Assert.assertTrue(heavyHittersContainsSubString("spoof")
-				|| heavyHittersContainsSubString("sp_spoof"));
-		}
-		finally {
-			rtplatform = platformOld;
-			DMLScript.USE_LOCAL_SPARK_CONFIG = sparkConfigOld;
-			OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = oldFlag;
-			OptimizerUtils.ALLOW_AUTO_VECTORIZATION = true;
-			OptimizerUtils.ALLOW_OPERATOR_FUSION = true;
+			boolean sparkConfigOld = DMLScript.USE_LOCAL_SPARK_CONFIG;
+			if (rtplatform == RUNTIME_PLATFORM.SPARK || rtplatform == RUNTIME_PLATFORM.HYBRID_SPARK)
+				DMLScript.USE_LOCAL_SPARK_CONFIG = true;
+
+			OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = rewrites;
+
+			try {
+				String TEST_NAME = TEST_NAME1;
+				TestConfiguration config = getTestConfiguration(TEST_NAME);
+				loadTestConfiguration(config);
+
+				double sparsity = sparse ? sparsity2 : sparsity1;
+
+				if (type == DatagenType.LINREG) {
+					fullDMLScriptName = "scripts/datagen/genRandData4LinearRegression.dml";
+					programArgs = new String[] { "-explain", "-stats", "-args", String.valueOf(rows), String.valueOf(cols), "10", "1", output("w"),
+							output("X"), output("y"), "1", "1", String.valueOf(sparsity), "binary" };
+				} else { //LOGREG
+					fullDMLScriptName = "scripts/datagen/genRandData4LogisticRegression.dml";
+					programArgs = new String[] { "-explain", "-stats", "-args", String.valueOf(rows), String.valueOf(cols), "10", "1", output("w"),
+							output("X"), output("y"), "1", "1", String.valueOf(sparsity), "binary", "1" };
+				}
+
+				runTest(true, false, null, -1);
+
+				Assert.assertTrue(heavyHittersContainsSubString("spoof") || heavyHittersContainsSubString("sp_spoof"));
+			} finally {
+				rtplatform = platformOld;
+				DMLScript.USE_LOCAL_SPARK_CONFIG = sparkConfigOld;
+				OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = oldFlag;
+				OptimizerUtils.ALLOW_AUTO_VECTORIZATION = true;
+				OptimizerUtils.ALLOW_OPERATOR_FUSION = true;
+			}
 		}
 	}
 
@@ -193,7 +202,15 @@ public class AlgorithmDatagen extends AutomatedTestBase
 	@Override
 	protected File getConfigTemplateFile() {
 		// Instrumentation in this test's output log to show custom configuration file used for template.
-		System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE.getPath());
-		return TEST_CONF_FILE;
+		if(currentTestType == TestType.FUSE_ALL){
+			System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE_FUSE_ALL.getPath());
+			return TEST_CONF_FILE_FUSE_ALL;
+		} else if(currentTestType == TestType.FUSE_NO_REDUNDANCY){
+			System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE_FUSE_NO_REDUNDANCY.getPath());
+			return TEST_CONF_FILE_FUSE_NO_REDUNDANCY;
+		} else {
+			System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE_DEFAULT.getPath());
+			return TEST_CONF_FILE_DEFAULT;
+		}
 	}
 }

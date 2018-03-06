@@ -36,9 +36,14 @@ public class AlgorithmStepwiseRegression extends AutomatedTestBase
 	private final static String TEST_NAME1 = "Algorithm_Stepwise";
 	private final static String TEST_DIR = "functions/codegenalg/";
 	private final static String TEST_CLASS_DIR = TEST_DIR + AlgorithmStepwiseRegression.class.getSimpleName() + "/";
-	private final static String TEST_CONF = "SystemML-config-codegen.xml";
-	private final static File   TEST_CONF_FILE = new File(SCRIPT_DIR + TEST_DIR, TEST_CONF);
-	
+	private final static String TEST_CONF_DEFAULT = "SystemML-config-codegen.xml";
+	private final static File TEST_CONF_FILE_DEFAULT = new File(SCRIPT_DIR + TEST_DIR, TEST_CONF_DEFAULT);
+	private final static String TEST_CONF_FUSE_ALL = "SystemML-config-codegen-fuse-all.xml";
+	private final static File TEST_CONF_FILE_FUSE_ALL = new File(SCRIPT_DIR + TEST_DIR, TEST_CONF_FUSE_ALL);
+	private final static String TEST_CONF_FUSE_NO_REDUNDANCY = "SystemML-config-codegen-fuse-no-redundancy.xml";
+	private final static File TEST_CONF_FILE_FUSE_NO_REDUNDANCY = new File(SCRIPT_DIR + TEST_DIR,
+			TEST_CONF_FUSE_NO_REDUNDANCY);
+
 	private final static int rows = 2468;
 	private final static int cols = 200;
 	
@@ -52,6 +57,9 @@ public class AlgorithmStepwiseRegression extends AutomatedTestBase
 		GLM_PROBIT,
 		LINREG_DS,
 	}
+
+	private enum TestType { DEFAULT,FUSE_ALL,FUSE_NO_REDUNDANCY }
+	private static TestType currentTestType = TestType.DEFAULT;
 	
 	@Override
 	public void setUp() {
@@ -141,56 +149,58 @@ public class AlgorithmStepwiseRegression extends AutomatedTestBase
 	
 	private void runStepwiseTest( StepwiseType type, boolean sparse, boolean rewrites, ExecType instType)
 	{
-		boolean oldFlag = OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION;
-		RUNTIME_PLATFORM platformOld = rtplatform;
-		switch( instType ){
-			case SPARK: rtplatform = RUNTIME_PLATFORM.SPARK; break;
-			default: rtplatform = RUNTIME_PLATFORM.HYBRID_SPARK; break;
-		}
-	
-		boolean sparkConfigOld = DMLScript.USE_LOCAL_SPARK_CONFIG;
-		if( rtplatform == RUNTIME_PLATFORM.SPARK || rtplatform == RUNTIME_PLATFORM.HYBRID_SPARK )
-			DMLScript.USE_LOCAL_SPARK_CONFIG = true;
-
-		try
-		{
-			String TEST_NAME = TEST_NAME1;
-			TestConfiguration config = getTestConfiguration(TEST_NAME);
-			loadTestConfiguration(config);
-			
-			if( type ==  StepwiseType.LINREG_DS) {
-				fullDMLScriptName = "scripts/algorithms/StepLinearRegDS.dml";
-				programArgs = new String[]{ "-explain", "-stats", "-nvargs",
-					"X="+input("X"), "Y="+input("Y"), "icpt="+String.valueOf(icpt),
-					"thr="+String.valueOf(thr), "B="+output("B"), "S="+output("S")};
+		for(TestType testType:TestType.values()) {
+			currentTestType = testType;
+			boolean oldFlag = OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION;
+			RUNTIME_PLATFORM platformOld = rtplatform;
+			switch (instType) {
+			case SPARK:
+				rtplatform = RUNTIME_PLATFORM.SPARK;
+				break;
+			default:
+				rtplatform = RUNTIME_PLATFORM.HYBRID_SPARK;
+				break;
 			}
-			else { //GLM binomial probit
-				fullDMLScriptName = "scripts/algorithms/StepGLM.dml";
-				programArgs = new String[]{ "-explain", "-stats", "-nvargs",
-					"X="+input("X"), "Y="+input("Y"), "icpt="+String.valueOf(icpt),
-					"thr="+String.valueOf(thr), "link=3", "yneg=0",
-					"moi=5", "mii=5", "B="+output("B"), "S="+output("S")};
-			}
-			
-			OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = rewrites;
-			
-			//generate actual datasets
-			double[][] X = getRandomMatrix(rows, cols, 0, 1, sparse?sparsity2:sparsity1, 714);
-			writeInputMatrixWithMTD("X", X, true);
-			double[][] y = TestUtils.round(getRandomMatrix(rows, 1, 0, 1, 1.0, 136));
-			writeInputMatrixWithMTD("Y", y, true);
-			
-			runTest(true, false, null, -1); 
 
-			Assert.assertTrue(heavyHittersContainsSubString("spoof")
-				|| heavyHittersContainsSubString("sp_spoof"));
-		}
-		finally {
-			rtplatform = platformOld;
-			DMLScript.USE_LOCAL_SPARK_CONFIG = sparkConfigOld;
-			OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = oldFlag;
-			OptimizerUtils.ALLOW_AUTO_VECTORIZATION = true;
-			OptimizerUtils.ALLOW_OPERATOR_FUSION = true;
+			boolean sparkConfigOld = DMLScript.USE_LOCAL_SPARK_CONFIG;
+			if (rtplatform == RUNTIME_PLATFORM.SPARK || rtplatform == RUNTIME_PLATFORM.HYBRID_SPARK)
+				DMLScript.USE_LOCAL_SPARK_CONFIG = true;
+
+			try {
+				String TEST_NAME = TEST_NAME1;
+				TestConfiguration config = getTestConfiguration(TEST_NAME);
+				loadTestConfiguration(config);
+
+				if (type == StepwiseType.LINREG_DS) {
+					fullDMLScriptName = "scripts/algorithms/StepLinearRegDS.dml";
+					programArgs = new String[] { "-explain", "-stats", "-nvargs", "X=" + input("X"), "Y=" + input("Y"),
+							"icpt=" + String.valueOf(icpt), "thr=" + String.valueOf(thr), "B=" + output("B"),
+							"S=" + output("S") };
+				} else { //GLM binomial probit
+					fullDMLScriptName = "scripts/algorithms/StepGLM.dml";
+					programArgs = new String[] { "-explain", "-stats", "-nvargs", "X=" + input("X"), "Y=" + input("Y"),
+							"icpt=" + String.valueOf(icpt), "thr=" + String.valueOf(thr), "link=3", "yneg=0", "moi=5",
+							"mii=5", "B=" + output("B"), "S=" + output("S") };
+				}
+
+				OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = rewrites;
+
+				//generate actual datasets
+				double[][] X = getRandomMatrix(rows, cols, 0, 1, sparse ? sparsity2 : sparsity1, 714);
+				writeInputMatrixWithMTD("X", X, true);
+				double[][] y = TestUtils.round(getRandomMatrix(rows, 1, 0, 1, 1.0, 136));
+				writeInputMatrixWithMTD("Y", y, true);
+
+				runTest(true, false, null, -1);
+
+				Assert.assertTrue(heavyHittersContainsSubString("spoof") || heavyHittersContainsSubString("sp_spoof"));
+			} finally {
+				rtplatform = platformOld;
+				DMLScript.USE_LOCAL_SPARK_CONFIG = sparkConfigOld;
+				OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = oldFlag;
+				OptimizerUtils.ALLOW_AUTO_VECTORIZATION = true;
+				OptimizerUtils.ALLOW_OPERATOR_FUSION = true;
+			}
 		}
 	}
 
@@ -201,7 +211,15 @@ public class AlgorithmStepwiseRegression extends AutomatedTestBase
 	@Override
 	protected File getConfigTemplateFile() {
 		// Instrumentation in this test's output log to show custom configuration file used for template.
-		System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE.getPath());
-		return TEST_CONF_FILE;
+		if(currentTestType == TestType.FUSE_ALL){
+			System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE_FUSE_ALL.getPath());
+			return TEST_CONF_FILE_FUSE_ALL;
+		} else if(currentTestType == TestType.FUSE_NO_REDUNDANCY){
+			System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE_FUSE_NO_REDUNDANCY.getPath());
+			return TEST_CONF_FILE_FUSE_NO_REDUNDANCY;
+		} else {
+			System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE_DEFAULT.getPath());
+			return TEST_CONF_FILE_DEFAULT;
+		}
 	}
 }

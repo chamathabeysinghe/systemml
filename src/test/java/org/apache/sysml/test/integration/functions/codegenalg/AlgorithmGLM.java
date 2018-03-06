@@ -36,9 +36,14 @@ public class AlgorithmGLM extends AutomatedTestBase
 	private final static String TEST_NAME1 = "Algorithm_GLM";
 	private final static String TEST_DIR = "functions/codegenalg/";
 	private final static String TEST_CLASS_DIR = TEST_DIR + AlgorithmGLM.class.getSimpleName() + "/";
-	private final static String TEST_CONF = "SystemML-config-codegen.xml";
-	private final static File   TEST_CONF_FILE = new File(SCRIPT_DIR + TEST_DIR, TEST_CONF);
-	
+	private final static String TEST_CONF_DEFAULT = "SystemML-config-codegen.xml";
+	private final static File TEST_CONF_FILE_DEFAULT = new File(SCRIPT_DIR + TEST_DIR, TEST_CONF_DEFAULT);
+	private final static String TEST_CONF_FUSE_ALL = "SystemML-config-codegen-fuse-all.xml";
+	private final static File TEST_CONF_FILE_FUSE_ALL = new File(SCRIPT_DIR + TEST_DIR, TEST_CONF_FUSE_ALL);
+	private final static String TEST_CONF_FUSE_NO_REDUNDANCY = "SystemML-config-codegen-fuse-no-redundancy.xml";
+	private final static File TEST_CONF_FILE_FUSE_NO_REDUNDANCY = new File(SCRIPT_DIR + TEST_DIR,
+			TEST_CONF_FUSE_NO_REDUNDANCY);
+
 	//private final static double eps = 1e-5;
 	
 	private final static int rows = 2468;
@@ -56,6 +61,9 @@ public class AlgorithmGLM extends AutomatedTestBase
 		GAMMA_LOG,
 		BINOMIAL_PROBIT,
 	}
+
+	private enum TestType { DEFAULT,FUSE_ALL,FUSE_NO_REDUNDANCY }
+	private static TestType currentTestType = TestType.DEFAULT;
 	
 	@Override
 	public void setUp() {
@@ -185,71 +193,88 @@ public class AlgorithmGLM extends AutomatedTestBase
 	
 	private void runGLMTest( GLMType type, boolean rewrites, boolean sparse, ExecType instType)
 	{
-		boolean oldFlag = OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION;
-		RUNTIME_PLATFORM platformOld = rtplatform;
-		switch( instType ){
-			case MR: rtplatform = RUNTIME_PLATFORM.HADOOP; break;
-			case SPARK: rtplatform = RUNTIME_PLATFORM.SPARK; break;
-			default: rtplatform = RUNTIME_PLATFORM.HYBRID_SPARK; break;
-		}
-	
-		boolean sparkConfigOld = DMLScript.USE_LOCAL_SPARK_CONFIG;
-		if( rtplatform == RUNTIME_PLATFORM.SPARK || rtplatform == RUNTIME_PLATFORM.HYBRID_SPARK )
-			DMLScript.USE_LOCAL_SPARK_CONFIG = true;
+		for(TestType testType:TestType.values()) {
+			currentTestType = testType;
+			boolean oldFlag = OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION;
+			RUNTIME_PLATFORM platformOld = rtplatform;
+			switch (instType) {
+			case MR:
+				rtplatform = RUNTIME_PLATFORM.HADOOP;
+				break;
+			case SPARK:
+				rtplatform = RUNTIME_PLATFORM.SPARK;
+				break;
+			default:
+				rtplatform = RUNTIME_PLATFORM.HYBRID_SPARK;
+				break;
+			}
 
-		try
-		{
-			String TEST_NAME = TEST_NAME1;
-			TestConfiguration config = getTestConfiguration(TEST_NAME);
-			loadTestConfiguration(config);
-			
-			String[] addArgs = new String[4];
-			String param4Name = "lpow=";
-			switch(type) {
+			boolean sparkConfigOld = DMLScript.USE_LOCAL_SPARK_CONFIG;
+			if (rtplatform == RUNTIME_PLATFORM.SPARK || rtplatform == RUNTIME_PLATFORM.HYBRID_SPARK)
+				DMLScript.USE_LOCAL_SPARK_CONFIG = true;
+
+			try {
+				String TEST_NAME = TEST_NAME1;
+				TestConfiguration config = getTestConfiguration(TEST_NAME);
+				loadTestConfiguration(config);
+
+				String[] addArgs = new String[4];
+				String param4Name = "lpow=";
+				switch (type) {
 				case POISSON_LOG: //dfam, vpow, link, lpow
-					addArgs[0] = "1"; addArgs[1] = "1.0"; addArgs[2] = "1"; addArgs[3] = "0.0";
+					addArgs[0] = "1";
+					addArgs[1] = "1.0";
+					addArgs[2] = "1";
+					addArgs[3] = "0.0";
 					break;
 				case GAMMA_LOG:   //dfam, vpow, link, lpow
-					addArgs[0] = "1"; addArgs[1] = "2.0"; addArgs[2] = "1"; addArgs[3] = "0.0";
+					addArgs[0] = "1";
+					addArgs[1] = "2.0";
+					addArgs[2] = "1";
+					addArgs[3] = "0.0";
 					break;
 				case BINOMIAL_PROBIT: //dfam, vpow, link, yneg 
-					addArgs[0] = "2"; addArgs[1] = "0.0"; addArgs[2] = "3"; addArgs[3] = "0";
+					addArgs[0] = "2";
+					addArgs[1] = "0.0";
+					addArgs[2] = "3";
+					addArgs[3] = "0";
 					param4Name = "yneg=";
 					break;
+				}
+
+				fullDMLScriptName = "scripts/algorithms/GLM.dml";
+				programArgs = new String[] { "-explain", "-stats", "-nvargs", "X=" + input("X"), "Y=" + input("Y"),
+						"icpt=" + String.valueOf(intercept), "tol=" + String.valueOf(epsilon), "moi=" + String.valueOf(maxiter),
+						"dfam=" + addArgs[0], "vpow=" + addArgs[1],
+						"link=" + addArgs[2], param4Name + addArgs[3], "B=" + output("w") };
+
+				rCmd = getRCmd(inputDir(), String.valueOf(intercept), String.valueOf(epsilon), String.valueOf(maxiter),
+						addArgs[0], addArgs[1], addArgs[2], addArgs[3], expectedDir());
+
+				OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = rewrites;
+
+				//generate actual datasets
+				double[][] X = getRandomMatrix(rows, cols, 0, 1, sparse ? sparsity2 : sparsity1, 714);
+				writeInputMatrixWithMTD("X", X, true);
+				double[][] y = TestUtils.round(getRandomMatrix(rows, 1, 0, 1, 1.0, 136));
+				writeInputMatrixWithMTD("Y", y, true);
+
+				runTest(true, false, null, -1);
+				//TODO fix R glm script
+				//runRScript(true);
+
+				//compare matrices
+				//HashMap<CellIndex, Double> dmlfile = readDMLMatrixFromHDFS("w");
+				//HashMap<CellIndex, Double> rfile  = readRMatrixFromFS("w");
+				//TestUtils.compareMatrices(dmlfile, rfile, eps, "Stat-DML", "Stat-R");
+				Assert.assertTrue(heavyHittersContainsSubString("spoof") || heavyHittersContainsSubString("sp_spoof"));
+			} finally {
+				rtplatform = platformOld;
+				DMLScript.USE_LOCAL_SPARK_CONFIG = sparkConfigOld;
+				OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = oldFlag;
+				OptimizerUtils.ALLOW_AUTO_VECTORIZATION = true;
+				OptimizerUtils.ALLOW_OPERATOR_FUSION = true;
 			}
-			
-			fullDMLScriptName = "scripts/algorithms/GLM.dml";
-			programArgs = new String[]{ "-explain", "-stats", "-nvargs", "X="+input("X"), "Y="+input("Y"),
-				"icpt="+String.valueOf(intercept), "tol="+String.valueOf(epsilon), "moi="+String.valueOf(maxiter), 
-				"dfam="+addArgs[0], "vpow="+addArgs[1], "link="+addArgs[2], param4Name+addArgs[3], "B="+output("w")};
-
-			rCmd = getRCmd(inputDir(), String.valueOf(intercept),String.valueOf(epsilon),
-				String.valueOf(maxiter), addArgs[0], addArgs[1], addArgs[2], addArgs[3], expectedDir());
-
-			OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = rewrites;
-			
-			//generate actual datasets
-			double[][] X = getRandomMatrix(rows, cols, 0, 1, sparse?sparsity2:sparsity1, 714);
-			writeInputMatrixWithMTD("X", X, true);
-			double[][] y = TestUtils.round(getRandomMatrix(rows, 1, 0, 1, 1.0, 136));
-			writeInputMatrixWithMTD("Y", y, true);
-			
-			runTest(true, false, null, -1); 
-			//TODO fix R glm script
-			//runRScript(true); 
-			
-			//compare matrices 
-			//HashMap<CellIndex, Double> dmlfile = readDMLMatrixFromHDFS("w");
-			//HashMap<CellIndex, Double> rfile  = readRMatrixFromFS("w");
-			//TestUtils.compareMatrices(dmlfile, rfile, eps, "Stat-DML", "Stat-R");
-			Assert.assertTrue(heavyHittersContainsSubString("spoof") || heavyHittersContainsSubString("sp_spoof"));
-		}
-		finally {
-			rtplatform = platformOld;
-			DMLScript.USE_LOCAL_SPARK_CONFIG = sparkConfigOld;
-			OptimizerUtils.ALLOW_ALGEBRAIC_SIMPLIFICATION = oldFlag;
-			OptimizerUtils.ALLOW_AUTO_VECTORIZATION = true;
-			OptimizerUtils.ALLOW_OPERATOR_FUSION = true;
 		}
 	}
 
@@ -260,7 +285,15 @@ public class AlgorithmGLM extends AutomatedTestBase
 	@Override
 	protected File getConfigTemplateFile() {
 		// Instrumentation in this test's output log to show custom configuration file used for template.
-		System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE.getPath());
-		return TEST_CONF_FILE;
+		if(currentTestType == TestType.FUSE_ALL){
+			System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE_FUSE_ALL.getPath());
+			return TEST_CONF_FILE_FUSE_ALL;
+		} else if(currentTestType == TestType.FUSE_NO_REDUNDANCY){
+			System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE_FUSE_NO_REDUNDANCY.getPath());
+			return TEST_CONF_FILE_FUSE_NO_REDUNDANCY;
+		} else {
+			System.out.println("This test case overrides default configuration with " + TEST_CONF_FILE_DEFAULT.getPath());
+			return TEST_CONF_FILE_DEFAULT;
+		}
 	}
 }
